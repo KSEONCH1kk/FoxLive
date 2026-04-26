@@ -1,0 +1,1014 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Карточная игра</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Nunito:wght@700;800;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --felt: #1a6b3a;
+    --felt-dark: #145530;
+    --panel-bg: #1c2333;
+    --panel-mid: #252e42;
+    --panel-light: #2e3a55;
+    --blue-accent: #4a9eff;
+    --red-accent: #e03a3a;
+    --orange-accent: #e8971e;
+    --gold: #f5c842;
+    --green-btn: #2ecc71;
+    --text-light: #e8edf5;
+    --text-dim: #8a9bb5;
+    --card-white: #fafbff;
+    --card-shadow: rgba(0,0,0,0.45);
+    --spade: #1a1a2e;
+    --heart: #d32f2f;
+    --diamond: #e8971e;
+    --club: #1a1a2e;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Nunito', sans-serif;
+    background: var(--felt-dark);
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  /* ======= LEFT SIDEBAR ======= */
+  .sidebar {
+    width: 230px;
+    min-width: 230px;
+    background: var(--panel-bg);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    border-right: 3px solid #0d1320;
+    z-index: 10;
+  }
+
+  .blind-header {
+    background: var(--blue-accent);
+    border-radius: 10px;
+    padding: 7px 12px;
+    text-align: center;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 10px;
+    color: #fff;
+    letter-spacing: 0.5px;
+    box-shadow: 0 3px 0 #1a5faa, 0 4px 8px rgba(0,0,0,0.4);
+    border: 2px solid #6bbfff;
+  }
+
+  .blind-info {
+    background: var(--panel-mid);
+    border-radius: 10px;
+    padding: 10px 12px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border: 2px solid var(--panel-light);
+  }
+
+  .blind-icon {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #7b5fbf, #4a2d8a);
+    border: 3px solid #9e7de0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    box-shadow: 0 3px 10px rgba(0,0,0,0.5);
+    flex-shrink: 0;
+  }
+
+  .blind-icon span {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 7px;
+    color: #fff;
+    line-height: 1.3;
+    text-align: center;
+  }
+
+  .blind-stats {
+    flex: 1;
+  }
+
+  .blind-min-label {
+    font-size: 10px;
+    color: var(--text-dim);
+    font-weight: 700;
+  }
+
+  .blind-score {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 14px;
+    color: #ff4444;
+  }
+
+  .blind-score .snowflake { font-size: 12px; }
+
+  .blind-reward {
+    font-size: 10px;
+    color: var(--text-dim);
+    font-weight: 700;
+  }
+
+  .blind-reward span { color: var(--gold); }
+
+  /* Round points */
+  .round-points {
+    background: var(--panel-mid);
+    border-radius: 10px;
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border: 2px solid var(--panel-light);
+  }
+
+  .round-points-label {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-weight: 800;
+    line-height: 1.3;
+  }
+
+  .round-points-value {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 16px;
+    color: var(--text-light);
+  }
+
+  /* Hand type display */
+  .hand-type-panel {
+    background: var(--panel-mid);
+    border-radius: 10px;
+    padding: 8px 12px;
+    border: 2px solid var(--panel-light);
+  }
+
+  .hand-type-name {
+    font-size: 14px;
+    font-weight: 900;
+    color: var(--text-light);
+    margin-bottom: 4px;
+    font-style: italic;
+  }
+
+  .hand-type-name span {
+    color: var(--text-dim);
+    font-size: 11px;
+    font-weight: 700;
+    font-style: normal;
+  }
+
+  .score-display {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .score-chip {
+    flex: 1;
+    text-align: center;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 18px;
+    padding: 6px 4px;
+    border-radius: 6px;
+  }
+
+  .score-chip.blue {
+    background: #2a7fff;
+    color: #fff;
+    box-shadow: 0 3px 0 #1055cc;
+  }
+
+  .score-chip.red {
+    background: var(--red-accent);
+    color: #fff;
+    box-shadow: 0 3px 0 #991a1a;
+  }
+
+  .score-x {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 14px;
+    color: var(--text-light);
+    padding: 0 2px;
+  }
+
+  /* Action row */
+  .action-row {
+    display: flex;
+    gap: 6px;
+    align-items: stretch;
+  }
+
+  .btn-party {
+    background: var(--red-accent);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 7px;
+    padding: 8px 10px;
+    cursor: pointer;
+    box-shadow: 0 3px 0 #991a1a;
+    line-height: 1.6;
+    transition: transform 0.1s, box-shadow 0.1s;
+    flex-shrink: 0;
+  }
+
+  .btn-party:active { transform: translateY(2px); box-shadow: 0 1px 0 #991a1a; }
+
+  .stat-cells {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    flex: 1;
+  }
+
+  .stat-cell {
+    background: var(--panel-light);
+    border-radius: 7px;
+    padding: 5px 6px;
+    text-align: center;
+    border: 1px solid #3a4a6a;
+  }
+
+  .stat-cell-label {
+    font-size: 9px;
+    color: var(--text-dim);
+    font-weight: 700;
+  }
+
+  .stat-cell-value {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 11px;
+    color: var(--blue-accent);
+  }
+
+  .stat-cell-value.red { color: var(--red-accent); }
+
+  /* Money row */
+  .money-row {
+    background: var(--panel-mid);
+    border-radius: 10px;
+    padding: 8px 12px;
+    text-align: center;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 16px;
+    color: var(--gold);
+    border: 2px solid var(--panel-light);
+    box-shadow: inset 0 0 15px rgba(248, 200, 60, 0.08);
+  }
+
+  /* Options + Ante/Round */
+  .bottom-row {
+    display: flex;
+    gap: 6px;
+    align-items: stretch;
+  }
+
+  .btn-options {
+    background: var(--orange-accent);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 7px;
+    padding: 8px 10px;
+    cursor: pointer;
+    box-shadow: 0 3px 0 #a55f00;
+    transition: transform 0.1s, box-shadow 0.1s;
+    flex-shrink: 0;
+  }
+
+  .btn-options:active { transform: translateY(2px); box-shadow: 0 1px 0 #a55f00; }
+
+  .ante-round-cells {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    flex: 1;
+  }
+
+  .ante-cell {
+    background: var(--panel-light);
+    border-radius: 7px;
+    padding: 5px 6px;
+    text-align: center;
+    border: 1px solid #3a4a6a;
+  }
+
+  .ante-cell-label {
+    font-size: 9px;
+    color: var(--text-dim);
+    font-weight: 700;
+  }
+
+  .ante-cell-value {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 10px;
+    color: var(--text-light);
+  }
+
+  /* ======= MAIN AREA ======= */
+  .main-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: var(--felt);
+    background-image:
+      radial-gradient(ellipse at center, rgba(255,255,255,0.03) 0%, transparent 70%),
+      repeating-linear-gradient(0deg, transparent, transparent 29px, rgba(0,0,0,0.04) 30px),
+      repeating-linear-gradient(90deg, transparent, transparent 29px, rgba(0,0,0,0.04) 30px);
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Felt texture */
+  .main-area::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at 50% 30%, rgba(40,160,80,0.15) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  /* Top slots */
+  .top-slots {
+    display: flex;
+    justify-content: space-between;
+    padding: 14px 20px 0;
+    position: relative;
+    z-index: 2;
+  }
+
+  .slot-group {
+    display: flex;
+    gap: 8px;
+  }
+
+  .card-slot {
+    width: 52px;
+    height: 74px;
+    border-radius: 8px;
+    border: 2px dashed rgba(255,255,255,0.2);
+    background: rgba(0,0,0,0.15);
+  }
+
+  .slot-label {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 9px;
+    color: rgba(255,255,255,0.5);
+    margin-bottom: 4px;
+  }
+
+  /* Cards area */
+  .cards-area {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 20px 0;
+    position: relative;
+    z-index: 2;
+  }
+
+  .hand-container {
+    display: flex;
+    align-items: flex-end;
+    gap: -8px;
+    position: relative;
+    height: 180px;
+  }
+
+  .playing-card {
+    width: 80px;
+    height: 118px;
+    background: var(--card-white);
+    border-radius: 8px;
+    border: 1.5px solid #d0d8e8;
+    box-shadow: 3px 4px 12px var(--card-shadow), 1px 1px 0 rgba(255,255,255,0.8) inset;
+    position: relative;
+    cursor: pointer;
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+    flex-shrink: 0;
+    margin-right: -14px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 5px 6px;
+    overflow: hidden;
+  }
+
+  .playing-card:last-child { margin-right: 0; }
+
+  .playing-card:hover {
+    transform: translateY(-18px) rotate(-1deg);
+    box-shadow: 5px 12px 24px rgba(0,0,0,0.55);
+    z-index: 50;
+  }
+
+  .playing-card.selected {
+    transform: translateY(-22px);
+    box-shadow: 0 0 0 3px var(--gold), 5px 16px 28px rgba(0,0,0,0.55);
+    z-index: 40;
+  }
+
+  .playing-card.selected::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 7px;
+    background: rgba(245, 200, 66, 0.12);
+  }
+
+  .card-corner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    line-height: 1;
+  }
+
+  .card-corner.bottom {
+    transform: rotate(180deg);
+    align-self: flex-end;
+  }
+
+  .card-rank {
+    font-size: 14px;
+    font-weight: 900;
+    line-height: 1;
+  }
+
+  .card-suit-small {
+    font-size: 11px;
+    line-height: 1;
+  }
+
+  .card-center {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 30px;
+    opacity: 0.15;
+    pointer-events: none;
+  }
+
+  .card-pip-grid {
+    position: absolute;
+    inset: 18px 8px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+  }
+
+  .pip {
+    font-size: 13px;
+    line-height: 1;
+  }
+
+  .black { color: var(--spade); }
+  .red { color: var(--heart); }
+  .orange { color: var(--diamond); }
+
+  /* Special king card */
+  .king-art {
+    position: absolute;
+    inset: 12px 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 46px;
+    opacity: 0.25;
+  }
+
+  /* Bottom controls */
+  .bottom-controls {
+    padding: 12px 20px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: relative;
+    z-index: 2;
+  }
+
+  .cards-count {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 9px;
+    color: rgba(255,255,255,0.6);
+    text-align: center;
+    margin-bottom: 6px;
+  }
+
+  .btn-play {
+    background: linear-gradient(180deg, #4ab8ff 0%, #1e7fe0 100%);
+    color: #fff;
+    border: none;
+    border-radius: 12px;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 11px;
+    padding: 14px 22px;
+    cursor: pointer;
+    box-shadow: 0 4px 0 #0d4fa0, 0 6px 16px rgba(30,127,224,0.4);
+    transition: transform 0.1s, box-shadow 0.1s;
+    white-space: nowrap;
+    border: 2px solid #6cd0ff;
+  }
+
+  .btn-play:hover { background: linear-gradient(180deg, #5ec8ff 0%, #2a8ff0 100%); }
+  .btn-play:active { transform: translateY(3px); box-shadow: 0 1px 0 #0d4fa0; }
+
+  .sort-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .sort-label {
+    background: var(--panel-bg);
+    color: var(--text-light);
+    border: 2px solid #3a4a6a;
+    border-radius: 8px 8px 0 0;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 8px;
+    padding: 8px 14px;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  .sort-btns {
+    display: flex;
+    gap: 3px;
+  }
+
+  .btn-sort {
+    flex: 1;
+    background: linear-gradient(180deg, #f0a020 0%, #c07000 100%);
+    color: #fff;
+    border: none;
+    border-radius: 0 0 7px 7px;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 7px;
+    padding: 7px 10px;
+    cursor: pointer;
+    box-shadow: 0 3px 0 #804800;
+    transition: transform 0.1s;
+    white-space: nowrap;
+  }
+
+  .btn-sort:active { transform: translateY(2px); }
+
+  .btn-discard {
+    background: #555e70;
+    color: #888fa0;
+    border: none;
+    border-radius: 12px;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 10px;
+    padding: 14px 20px;
+    cursor: not-allowed;
+    box-shadow: 0 4px 0 #333a45;
+    white-space: nowrap;
+    border: 2px solid #666e80;
+  }
+
+  /* Deck bottom right */
+  .deck-widget {
+    position: absolute;
+    bottom: 16px;
+    right: 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    z-index: 5;
+  }
+
+  .deck-card {
+    width: 62px;
+    height: 88px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #c0392b 0%, #8b0000 50%, #c0392b 100%);
+    border: 2px solid #fff;
+    box-shadow: 3px 4px 12px rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+    cursor: pointer;
+  }
+
+  .deck-card::before {
+    content: '';
+    position: absolute;
+    inset: 4px;
+    border: 1.5px solid rgba(255,255,255,0.4);
+    border-radius: 4px;
+  }
+
+  .deck-card::after {
+    content: '✦';
+    font-size: 22px;
+    color: rgba(255,255,255,0.5);
+  }
+
+  .deck-pattern {
+    position: absolute;
+    inset: 0;
+    background-image: repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 6px,
+      rgba(255,255,255,0.05) 6px,
+      rgba(255,255,255,0.05) 8px
+    );
+  }
+
+  .deck-count {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 8px;
+    color: rgba(255,255,255,0.7);
+  }
+
+  /* Controls wrapper bottom */
+  .bottom-controls-wrapper {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .spacer { flex: 1; }
+
+  /* Snowflake icon */
+  .snow-icon {
+    display: inline-block;
+    color: #88ccff;
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<div class="sidebar">
+  <!-- Blind Header -->
+  <div class="blind-header">Малый блайнд</div>
+
+  <!-- Blind Info -->
+  <div class="blind-info">
+    <div class="blind-icon">
+      <span>SMALL</span>
+      <span>BLIND</span>
+    </div>
+    <div class="blind-stats">
+      <div class="blind-min-label">Минимум очков</div>
+      <div class="blind-score">
+        <span class="snow-icon">❄</span>
+        <span>300</span>
+      </div>
+      <div class="blind-reward">Награда: <span>$$$</span></div>
+    </div>
+  </div>
+
+  <!-- Round Points -->
+  <div class="round-points">
+    <div class="round-points-label">Раунд<br>очки</div>
+    <div class="round-points-value">
+      <span class="snow-icon">❄</span>
+      <span>0</span>
+    </div>
+  </div>
+
+  <!-- Hand Type -->
+  <div class="hand-type-panel">
+    <div class="hand-type-name">Флеш <span>ур.1</span></div>
+    <div class="score-display">
+      <div class="score-chip blue" id="base-score">35</div>
+      <div class="score-x">✕</div>
+      <div class="score-chip red" id="multiplier">4</div>
+    </div>
+  </div>
+
+  <!-- Party + Stats -->
+  <div class="action-row">
+    <button class="btn-party">Партия<br>Детали</button>
+    <div class="stat-cells">
+      <div class="stat-cell">
+        <div class="stat-cell-label">Руки</div>
+        <div class="stat-cell-value" id="hands-count">4</div>
+      </div>
+      <div class="stat-cell">
+        <div class="stat-cell-label">Сбросы</div>
+        <div class="stat-cell-value red" id="discards-count">0</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Money -->
+  <div class="money-row" id="money-display">$4</div>
+
+  <!-- Options + Ante/Round -->
+  <div class="bottom-row">
+    <button class="btn-options">Пара-<br>метры</button>
+    <div class="ante-round-cells">
+      <div class="ante-cell">
+        <div class="ante-cell-label">Анте</div>
+        <div class="ante-cell-value">1/8</div>
+      </div>
+      <div class="ante-cell">
+        <div class="ante-cell-label">Раунд</div>
+        <div class="ante-cell-value">1</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN AREA -->
+<div class="main-area">
+
+  <!-- Top slots -->
+  <div class="top-slots">
+    <div>
+      <div class="slot-label">0/5</div>
+      <div class="slot-group">
+        <div class="card-slot"></div>
+        <div class="card-slot"></div>
+        <div class="card-slot"></div>
+        <div class="card-slot"></div>
+        <div class="card-slot"></div>
+      </div>
+    </div>
+    <div style="text-align:right">
+      <div class="slot-label" style="text-align:right">0/2</div>
+      <div class="slot-group">
+        <div class="card-slot"></div>
+        <div class="card-slot"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cards -->
+  <div class="cards-area">
+    <div class="hand-container" id="hand">
+
+      <!-- K♠ -->
+      <div class="playing-card black" onclick="toggleCard(this)">
+        <div class="card-corner"><span class="card-rank black">K</span><span class="card-suit-small black">♠</span></div>
+        <div class="king-art">♛</div>
+        <div class="card-corner bottom"><span class="card-rank black">K</span><span class="card-suit-small black">♠</span></div>
+      </div>
+
+      <!-- 10♠ -->
+      <div class="playing-card black" onclick="toggleCard(this)">
+        <div class="card-corner"><span class="card-rank black">10</span><span class="card-suit-small black">♠</span></div>
+        <div class="card-pip-grid">
+          <span class="pip black">♠</span><span class="pip black">♠</span>
+          <span class="pip black">♠</span><span class="pip black">♠</span>
+          <span class="pip black">♠</span><span class="pip black">♠</span>
+          <span class="pip black">♠</span><span class="pip black">♠</span>
+          <span class="pip black">♠</span><span class="pip black">♠</span>
+        </div>
+        <div class="card-corner bottom"><span class="card-rank black">10</span><span class="card-suit-small black">♠</span></div>
+      </div>
+
+      <!-- 9♥ -->
+      <div class="playing-card red" onclick="toggleCard(this)">
+        <div class="card-corner"><span class="card-rank red">9</span><span class="card-suit-small red">♥</span></div>
+        <div class="card-pip-grid">
+          <span class="pip red">♥</span><span class="pip red">♥</span>
+          <span class="pip red">♥</span><span class="pip red">♥</span>
+          <span class="pip red">♥</span>
+          <span class="pip red">♥</span><span class="pip red">♥</span>
+          <span class="pip red">♥</span><span class="pip red">♥</span>
+        </div>
+        <div class="card-corner bottom"><span class="card-rank red">9</span><span class="card-suit-small red">♥</span></div>
+      </div>
+
+      <!-- 8♠ -->
+      <div class="playing-card black" onclick="toggleCard(this)">
+        <div class="card-corner"><span class="card-rank black">8</span><span class="card-suit-small black">♠</span></div>
+        <div class="card-pip-grid">
+          <span class="pip black">♠</span><span class="pip black">♠</span>
+          <span class="pip black">♠</span><span class="pip black">♠</span>
+          <span class="pip black">♠</span><span class="pip black">♠</span>
+          <span class="pip black">♠</span><span class="pip black">♠</span>
+        </div>
+        <div class="card-corner bottom"><span class="card-rank black">8</span><span class="card-suit-small black">♠</span></div>
+      </div>
+
+      <!-- 6♠ -->
+      <div class="playing-card black" onclick="toggleCard(this)">
+        <div class="card-corner"><span class="card-rank black">6</span><span class="card-suit-small black">♠</span></div>
+        <div class="card-pip-grid">
+          <span class="pip black">♠</span><span class="pip black">♠</span>
+          <span class="pip black">♠</span><span class="pip black">♠</span>
+          <span class="pip black">♠</span><span class="pip black">♠</span>
+        </div>
+        <div class="card-corner bottom"><span class="card-rank black">6</span><span class="card-suit-small black">♠</span></div>
+      </div>
+
+      <!-- 5♥ -->
+      <div class="playing-card red" onclick="toggleCard(this)">
+        <div class="card-corner"><span class="card-rank red">5</span><span class="card-suit-small red">♥</span></div>
+        <div class="card-pip-grid">
+          <span class="pip red">♥</span><span class="pip red">♥</span>
+          <span class="pip red">♥</span>
+          <span class="pip red">♥</span><span class="pip red">♥</span>
+        </div>
+        <div class="card-corner bottom"><span class="card-rank red">5</span><span class="card-suit-small red">♥</span></div>
+      </div>
+
+      <!-- 4♠ -->
+      <div class="playing-card black" onclick="toggleCard(this)">
+        <div class="card-corner"><span class="card-rank black">4</span><span class="card-suit-small black">♠</span></div>
+        <div class="card-pip-grid">
+          <span class="pip black">♠</span><span class="pip black">♠</span>
+          <span class="pip black">♠</span><span class="pip black">♠</span>
+        </div>
+        <div class="card-corner bottom"><span class="card-rank black">4</span><span class="card-suit-small black">♠</span></div>
+      </div>
+
+      <!-- 2♦ -->
+      <div class="playing-card orange" onclick="toggleCard(this)">
+        <div class="card-corner"><span class="card-rank orange" style="color:#c07000">2</span><span class="card-suit-small orange" style="color:#c07000">♦</span></div>
+        <div class="card-pip-grid">
+          <span class="pip" style="color:#c07000">♦</span>
+          <span class="pip" style="color:#c07000">♦</span>
+        </div>
+        <div class="card-corner bottom"><span class="card-rank orange" style="color:#c07000">2</span><span class="card-suit-small orange" style="color:#c07000">♦</span></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Bottom controls -->
+  <div class="bottom-controls-wrapper">
+    <div class="cards-count" id="cards-count">8/8</div>
+    <div class="bottom-controls">
+      <button class="btn-play" onclick="playHand()">Играть руку</button>
+
+      <div class="sort-group">
+        <div class="sort-label">Сортировать руку</div>
+        <div class="sort-btns">
+          <button class="btn-sort" onclick="sortBy('rank')">Достоинство</button>
+          <button class="btn-sort" onclick="sortBy('suit')">Масть</button>
+        </div>
+      </div>
+
+      <button class="btn-discard" id="discard-btn">Сброс</button>
+    </div>
+  </div>
+
+  <!-- Deck -->
+  <div class="deck-widget">
+    <div class="deck-card">
+      <div class="deck-pattern"></div>
+    </div>
+    <div class="deck-count" id="deck-count">29/52</div>
+  </div>
+
+</div>
+
+<script>
+  let selectedCards = new Set();
+
+  function toggleCard(el) {
+    if (selectedCards.has(el)) {
+      selectedCards.delete(el);
+      el.classList.remove('selected');
+    } else {
+      if (selectedCards.size < 5) {
+        selectedCards.add(el);
+        el.classList.add('selected');
+      }
+    }
+    updateHandType();
+    updateDiscardBtn();
+  }
+
+  function updateDiscardBtn() {
+    const btn = document.getElementById('discard-btn');
+    const discards = parseInt(document.getElementById('discards-count').textContent);
+    if (selectedCards.size > 0 && discards < 4) {
+      btn.style.background = 'linear-gradient(180deg, #888 0%, #555 100%)';
+      btn.style.color = '#fff';
+      btn.style.cursor = 'pointer';
+    } else {
+      btn.style.background = '#555e70';
+      btn.style.color = '#888fa0';
+      btn.style.cursor = 'not-allowed';
+    }
+  }
+
+  // Simple hand detection
+  const handTypes = {
+    flush: { name: 'Флеш', base: 35, mult: 4 },
+    straight: { name: 'Стрит', base: 30, mult: 4 },
+    three: { name: 'Тройка', base: 30, mult: 3 },
+    twopair: { name: 'Две пары', base: 20, mult: 2 },
+    pair: { name: 'Пара', base: 10, mult: 2 },
+    high: { name: 'Старшая карта', base: 5, mult: 1 },
+  };
+
+  function updateHandType() {
+    const cards = [...selectedCards];
+    let hand = handTypes.high;
+
+    if (cards.length >= 5) {
+      // Check flush (all same suit)
+      const suits = cards.map(c => c.querySelector('.card-suit-small').textContent);
+      if (new Set(suits).size === 1) hand = handTypes.flush;
+    }
+    if (cards.length >= 3) {
+      const ranks = cards.map(c => c.querySelector('.card-rank').textContent);
+      const rankCounts = {};
+      ranks.forEach(r => rankCounts[r] = (rankCounts[r]||0) + 1);
+      const counts = Object.values(rankCounts).sort().reverse();
+      if (counts[0] >= 3 && hand === handTypes.high) hand = handTypes.three;
+    }
+
+    document.querySelector('.hand-type-name').innerHTML = `${hand.name} <span>ур.1</span>`;
+    document.getElementById('base-score').textContent = hand.base;
+    document.getElementById('multiplier').textContent = hand.mult;
+  }
+
+  function playHand() {
+    const hands = parseInt(document.getElementById('hands-count').textContent);
+    if (hands <= 0) return;
+
+    const selected = [...selectedCards];
+    if (selected.length === 0) return;
+
+    // Animate selected cards
+    selected.forEach(card => {
+      card.style.transition = 'transform 0.3s ease, opacity 0.3s ease';
+      card.style.transform = 'translateY(-120px)';
+      card.style.opacity = '0';
+    });
+
+    setTimeout(() => {
+      selected.forEach(c => c.remove());
+      selectedCards.clear();
+      const handEl = document.getElementById('hand');
+      const remaining = handEl.querySelectorAll('.playing-card').length;
+      document.getElementById('cards-count').textContent = `${remaining}/8`;
+
+      document.getElementById('hands-count').textContent = hands - 1;
+
+      // Update round points
+      const base = parseInt(document.getElementById('base-score').textContent);
+      const mult = parseInt(document.getElementById('multiplier').textContent);
+      const pts = document.getElementById('round-pts');
+      // simple display
+      updateHandType();
+    }, 350);
+  }
+
+  function sortBy(type) {
+    const hand = document.getElementById('hand');
+    const cards = [...hand.querySelectorAll('.playing-card')];
+
+    const rankOrder = {'A':14,'K':13,'Q':12,'J':11,'10':10,'9':9,'8':8,'7':7,'6':6,'5':5,'4':4,'3':3,'2':2};
+    const suitOrder = {'♠':1,'♥':2,'♦':3,'♣':4};
+
+    cards.sort((a, b) => {
+      const ar = a.querySelector('.card-rank').textContent;
+      const br = b.querySelector('.card-rank').textContent;
+      const as = a.querySelector('.card-suit-small').textContent;
+      const bs = b.querySelector('.card-suit-small').textContent;
+
+      if (type === 'rank') {
+        return (rankOrder[br] || 0) - (rankOrder[ar] || 0);
+      } else {
+        return (suitOrder[as] || 5) - (suitOrder[bs] || 5) || (rankOrder[br] || 0) - (rankOrder[ar] || 0);
+      }
+    });
+
+    cards.forEach(c => {
+      c.style.transition = 'none';
+      hand.appendChild(c);
+    });
+  }
+</script>
+</body>
+</html>
