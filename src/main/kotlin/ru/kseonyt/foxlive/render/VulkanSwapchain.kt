@@ -6,52 +6,65 @@ import org.lwjgl.vulkan.KHRSurface.*
 import org.lwjgl.vulkan.KHRSwapchain.*
 import org.lwjgl.vulkan.VK10.*
 
+/**
+ * Two-render-pass setup for postprocessing:
+ *
+ *   scenePass     — MSAA color + depth → resolve into sceneTex (sampled, single-sample)
+ *   compositePass — single-sample, samples sceneTex via fullscreen postfx, then UI on top → swapchain
+ */
 class VulkanSwapchain(val ctx: VulkanContext) {
-    var swapchain: Long = 0L
-        private set
-    var imageFormat: Int = 0
-        private set
-    var depthFormat: Int = 0
-        private set
-    var extentWidth: Int = 0
-        private set
-    var extentHeight: Int = 0
-        private set
-    var renderPass: Long = 0L
-        private set
-    var images: LongArray = LongArray(0)
-        private set
-    var imageViews: LongArray = LongArray(0)
-        private set
-    var framebuffers: LongArray = LongArray(0)
-        private set
+    var swapchain: Long = 0L; private set
+    var imageFormat: Int = 0; private set
+    var depthFormat: Int = 0; private set
+    var extentWidth: Int = 0; private set
+    var extentHeight: Int = 0; private set
 
-    var msaaSamples: Int = VK_SAMPLE_COUNT_1_BIT
-        private set
+    var scenePass: Long = 0L; private set
+    var compositePass: Long = 0L; private set
 
-    // MSAA color (single, transient, multi-sampled)
-    var colorImage: Long = 0L
-    var colorImageMemory: Long = 0L
-    var colorImageView: Long = 0L
+    var images: LongArray = LongArray(0); private set
+    var imageViews: LongArray = LongArray(0); private set
 
-    // Depth (multi-sampled when MSAA enabled)
-    var depthImage: Long = 0L
-    var depthImageMemory: Long = 0L
-    var depthImageView: Long = 0L
+    /** Single scene framebuffer (sceneTex is shared — guarded by per-frame fence). */
+    var sceneFramebuffer: Long = 0L; private set
+    /** One composite framebuffer per swapchain image (swapchain is the color attachment). */
+    var compositeFramebuffers: LongArray = LongArray(0); private set
+
+    var msaaSamples: Int = VK_SAMPLE_COUNT_1_BIT; private set
+
+    // MSAA color (multi-sampled, transient — only when MSAA enabled)
+    var msaaColorImage: Long = 0L; private set
+    var msaaColorMemory: Long = 0L; private set
+    var msaaColorView: Long = 0L; private set
+
+    // Depth (multi-sampled)
+    var depthImage: Long = 0L; private set
+    var depthImageMemory: Long = 0L; private set
+    var depthImageView: Long = 0L; private set
+
+    // Scene texture — postprocess input. Single-sample, sampled.
+    var sceneTexImage: Long = 0L; private set
+    var sceneTexMemory: Long = 0L; private set
+    var sceneTexView: Long = 0L; private set
+    var sceneTexSampler: Long = 0L; private set
+
+    /** Render-pass-compatibility view: legacy code may still query [renderPass] — this is the scene pass. */
+    val renderPass: Long get() = scenePass
 
     fun create() {
         msaaSamples = ctx.maxMsaaSamples
         createSwapchain()
         createImageViews()
         chooseDepthFormat()
-        createColorResources()
+        createMsaaColorIfNeeded()
         createDepthResources()
-        createRenderPass()
+        createSceneTexture()
+        createScenePass()
+        createCompositePass()
         createFramebuffers()
     }
 
     fun recreate() {
-        // Wait until window has non-zero size (handles minimization on Windows)
         while (true) {
             val sz = ctx.window.frameBufferSize()
             if (sz[0] != 0 && sz[1] != 0) break
@@ -97,7 +110,6 @@ class VulkanSwapchain(val ctx: VulkanContext) {
             extentWidth = sz[0].coerceIn(caps.minImageExtent().width(), caps.maxImageExtent().width())
             extentHeight = sz[1].coerceIn(caps.minImageExtent().height(), caps.maxImageExtent().height())
         }
-
         var imageCount = caps.minImageCount() + 1
         if (caps.maxImageCount() > 0 && imageCount > caps.maxImageCount()) imageCount = caps.maxImageCount()
 
@@ -149,14 +161,14 @@ class VulkanSwapchain(val ctx: VulkanContext) {
         } ?: error("No supported depth format")
     }
 
-    private fun createColorResources() {
+    private fun createMsaaColorIfNeeded() {
         if (msaaSamples == VK_SAMPLE_COUNT_1_BIT) return
         val (img, mem) = VulkanImage.createImage2D(ctx, extentWidth, extentHeight,
             imageFormat,
             VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT or VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
             samples = msaaSamples)
-        colorImage = img; colorImageMemory = mem
-        colorImageView = VulkanImage.createImageView2D(ctx, img, imageFormat, VK_IMAGE_ASPECT_COLOR_BIT)
+        msaaColorImage = img; msaaColorMemory = mem
+        msaaColorView = VulkanImage.createImageView2D(ctx, img, imageFormat, VK_IMAGE_ASPECT_COLOR_BIT)
     }
 
     private fun createDepthResources() {
@@ -168,61 +180,53 @@ class VulkanSwapchain(val ctx: VulkanContext) {
         depthImageView = VulkanImage.createImageView2D(ctx, img, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT)
     }
 
-    private fun createRenderPass() = stackPush().use { st ->
+    private fun createSceneTexture() {
+        val (img, mem) = VulkanImage.createImage2D(ctx, extentWidth, extentHeight,
+            imageFormat,
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT or VK_IMAGE_USAGE_SAMPLED_BIT,
+            samples = VK_SAMPLE_COUNT_1_BIT)
+        sceneTexImage = img; sceneTexMemory = mem
+        sceneTexView = VulkanImage.createImageView2D(ctx, img, imageFormat, VK_IMAGE_ASPECT_COLOR_BIT)
+        sceneTexSampler = VulkanImage.createSampler(ctx)
+    }
+
+    private fun createScenePass() = stackPush().use { st ->
         val msaa = msaaSamples != VK_SAMPLE_COUNT_1_BIT
         val attachmentCount = if (msaa) 3 else 2
         val attachments = VkAttachmentDescription.calloc(attachmentCount, st)
 
         if (msaa) {
-            // 0: multisample color (transient — discard after resolve)
             attachments.get(0)
-                .format(imageFormat)
-                .samples(msaaSamples)
-                .loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR)
-                .storeOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
-                .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE)
-                .stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
+                .format(imageFormat).samples(msaaSamples)
+                .loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR).storeOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
+                .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE).stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
                 .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED)
                 .finalLayout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
-            // 1: depth (multisampled)
             attachments.get(1)
-                .format(depthFormat)
-                .samples(msaaSamples)
-                .loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR)
-                .storeOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
-                .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE)
-                .stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
+                .format(depthFormat).samples(msaaSamples)
+                .loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR).storeOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
+                .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE).stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
                 .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED)
                 .finalLayout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
-            // 2: resolve color (single-sample swapchain image — presented)
+            // Resolve target — sceneTex, will be SAMPLED next pass
             attachments.get(2)
-                .format(imageFormat)
-                .samples(VK_SAMPLE_COUNT_1_BIT)
-                .loadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE)
-                .storeOp(VK_ATTACHMENT_STORE_OP_STORE)
-                .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE)
-                .stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
+                .format(imageFormat).samples(VK_SAMPLE_COUNT_1_BIT)
+                .loadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE).storeOp(VK_ATTACHMENT_STORE_OP_STORE)
+                .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE).stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
                 .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED)
-                .finalLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
+                .finalLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
         } else {
-            // 0: color (single sample directly to swapchain)
+            // Direct render to sceneTex (single-sample), no MSAA
             attachments.get(0)
-                .format(imageFormat)
-                .samples(VK_SAMPLE_COUNT_1_BIT)
-                .loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR)
-                .storeOp(VK_ATTACHMENT_STORE_OP_STORE)
-                .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE)
-                .stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
+                .format(imageFormat).samples(VK_SAMPLE_COUNT_1_BIT)
+                .loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR).storeOp(VK_ATTACHMENT_STORE_OP_STORE)
+                .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE).stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
                 .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED)
-                .finalLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
-            // 1: depth
+                .finalLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
             attachments.get(1)
-                .format(depthFormat)
-                .samples(VK_SAMPLE_COUNT_1_BIT)
-                .loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR)
-                .storeOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
-                .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE)
-                .stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
+                .format(depthFormat).samples(VK_SAMPLE_COUNT_1_BIT)
+                .loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR).storeOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
+                .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE).stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
                 .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED)
                 .finalLayout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
         }
@@ -231,72 +235,120 @@ class VulkanSwapchain(val ctx: VulkanContext) {
             .attachment(0).layout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
         val depthRef = VkAttachmentReference.calloc(st)
             .attachment(1).layout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
-
         val subpass = VkSubpassDescription.calloc(1, st)
             .pipelineBindPoint(VK_PIPELINE_BIND_POINT_GRAPHICS)
             .colorAttachmentCount(1)
             .pColorAttachments(colorRef)
             .pDepthStencilAttachment(depthRef)
-
         if (msaa) {
             val resolveRef = VkAttachmentReference.calloc(1, st)
                 .attachment(2).layout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
             subpass.pResolveAttachments(resolveRef)
         }
-
-        val dep = VkSubpassDependency.calloc(1, st)
-            .srcSubpass(VK_SUBPASS_EXTERNAL).dstSubpass(0)
-            .srcStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT or VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT)
-            .srcAccessMask(0)
+        // Make the resolve-to-shader-read transition explicit
+        val deps = VkSubpassDependency.calloc(2, st)
+        deps.get(0).srcSubpass(VK_SUBPASS_EXTERNAL).dstSubpass(0)
+            .srcStageMask(VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT)
+            .srcAccessMask(VK_ACCESS_SHADER_READ_BIT)
             .dstStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT or VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT)
             .dstAccessMask(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT or VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT)
+        deps.get(1).srcSubpass(0).dstSubpass(VK_SUBPASS_EXTERNAL)
+            .srcStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT)
+            .srcAccessMask(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT)
+            .dstStageMask(VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT)
+            .dstAccessMask(VK_ACCESS_SHADER_READ_BIT)
 
+        val info = VkRenderPassCreateInfo.calloc(st)
+            .sType(VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO)
+            .pAttachments(attachments).pSubpasses(subpass).pDependencies(deps)
+        val p = st.mallocLong(1)
+        Vk.check(vkCreateRenderPass(ctx.device, info, null, p))
+        scenePass = p.get(0)
+    }
+
+    private fun createCompositePass() = stackPush().use { st ->
+        val attachments = VkAttachmentDescription.calloc(1, st)
+        attachments.get(0)
+            .format(imageFormat).samples(VK_SAMPLE_COUNT_1_BIT)
+            .loadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE).storeOp(VK_ATTACHMENT_STORE_OP_STORE)
+            .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE).stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
+            .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED)
+            .finalLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
+        val colorRef = VkAttachmentReference.calloc(1, st)
+            .attachment(0).layout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+        val subpass = VkSubpassDescription.calloc(1, st)
+            .pipelineBindPoint(VK_PIPELINE_BIND_POINT_GRAPHICS)
+            .colorAttachmentCount(1).pColorAttachments(colorRef)
+        val dep = VkSubpassDependency.calloc(1, st)
+            .srcSubpass(VK_SUBPASS_EXTERNAL).dstSubpass(0)
+            .srcStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT)
+            .srcAccessMask(0)
+            .dstStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT)
+            .dstAccessMask(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT)
         val info = VkRenderPassCreateInfo.calloc(st)
             .sType(VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO)
             .pAttachments(attachments).pSubpasses(subpass).pDependencies(dep)
         val p = st.mallocLong(1)
         Vk.check(vkCreateRenderPass(ctx.device, info, null, p))
-        renderPass = p.get(0)
+        compositePass = p.get(0)
     }
 
     private fun createFramebuffers() = stackPush().use { st ->
+        // Scene framebuffer (single — sceneTex is shared across frames thanks to inFlight fence)
         val msaa = msaaSamples != VK_SAMPLE_COUNT_1_BIT
-        framebuffers = LongArray(imageViews.size)
-        val attach = st.mallocLong(if (msaa) 3 else 2)
+        val sceneAttach = st.mallocLong(if (msaa) 3 else 2)
+        if (msaa) {
+            sceneAttach.put(msaaColorView).put(depthImageView).put(sceneTexView)
+        } else {
+            sceneAttach.put(sceneTexView).put(depthImageView)
+        }
+        sceneAttach.flip()
+        val sceneFbInfo = VkFramebufferCreateInfo.calloc(st)
+            .sType(VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO)
+            .renderPass(scenePass).pAttachments(sceneAttach)
+            .width(extentWidth).height(extentHeight).layers(1)
+        val pSceneFb = st.mallocLong(1)
+        Vk.check(vkCreateFramebuffer(ctx.device, sceneFbInfo, null, pSceneFb))
+        sceneFramebuffer = pSceneFb.get(0)
+
+        // Composite framebuffers — one per swapchain image
+        compositeFramebuffers = LongArray(imageViews.size)
         val pFb = st.mallocLong(1)
+        val compAttach = st.mallocLong(1)
         for (i in imageViews.indices) {
-            attach.clear()
-            if (msaa) {
-                attach.put(colorImageView).put(depthImageView).put(imageViews[i])
-            } else {
-                attach.put(imageViews[i]).put(depthImageView)
-            }
-            attach.flip()
+            compAttach.put(0, imageViews[i])
             val info = VkFramebufferCreateInfo.calloc(st)
                 .sType(VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO)
-                .renderPass(renderPass)
-                .pAttachments(attach)
+                .renderPass(compositePass).pAttachments(compAttach)
                 .width(extentWidth).height(extentHeight).layers(1)
             Vk.check(vkCreateFramebuffer(ctx.device, info, null, pFb))
-            framebuffers[i] = pFb.get(0)
+            compositeFramebuffers[i] = pFb.get(0)
         }
     }
 
     fun cleanup() {
         if (!ctx.isReady()) return
-        for (fb in framebuffers) if (fb != 0L) vkDestroyFramebuffer(ctx.device, fb, null)
+        if (sceneFramebuffer != 0L) vkDestroyFramebuffer(ctx.device, sceneFramebuffer, null)
+        for (fb in compositeFramebuffers) if (fb != 0L) vkDestroyFramebuffer(ctx.device, fb, null)
+        if (sceneTexSampler != 0L) vkDestroySampler(ctx.device, sceneTexSampler, null)
+        if (sceneTexView != 0L) vkDestroyImageView(ctx.device, sceneTexView, null)
+        if (sceneTexImage != 0L) vkDestroyImage(ctx.device, sceneTexImage, null)
+        if (sceneTexMemory != 0L) vkFreeMemory(ctx.device, sceneTexMemory, null)
         if (depthImageView != 0L) vkDestroyImageView(ctx.device, depthImageView, null)
         if (depthImage != 0L) vkDestroyImage(ctx.device, depthImage, null)
         if (depthImageMemory != 0L) vkFreeMemory(ctx.device, depthImageMemory, null)
-        if (colorImageView != 0L) vkDestroyImageView(ctx.device, colorImageView, null)
-        if (colorImage != 0L) vkDestroyImage(ctx.device, colorImage, null)
-        if (colorImageMemory != 0L) vkFreeMemory(ctx.device, colorImageMemory, null)
+        if (msaaColorView != 0L) vkDestroyImageView(ctx.device, msaaColorView, null)
+        if (msaaColorImage != 0L) vkDestroyImage(ctx.device, msaaColorImage, null)
+        if (msaaColorMemory != 0L) vkFreeMemory(ctx.device, msaaColorMemory, null)
         for (v in imageViews) if (v != 0L) vkDestroyImageView(ctx.device, v, null)
-        if (renderPass != 0L) vkDestroyRenderPass(ctx.device, renderPass, null)
+        if (compositePass != 0L) vkDestroyRenderPass(ctx.device, compositePass, null)
+        if (scenePass != 0L) vkDestroyRenderPass(ctx.device, scenePass, null)
         if (swapchain != 0L) vkDestroySwapchainKHR(ctx.device, swapchain, null)
-        framebuffers = LongArray(0); imageViews = LongArray(0); images = LongArray(0)
-        renderPass = 0L; swapchain = 0L
+        sceneFramebuffer = 0L; compositeFramebuffers = LongArray(0)
+        imageViews = LongArray(0); images = LongArray(0)
+        scenePass = 0L; compositePass = 0L; swapchain = 0L
         depthImage = 0L; depthImageMemory = 0L; depthImageView = 0L
-        colorImage = 0L; colorImageMemory = 0L; colorImageView = 0L
+        msaaColorImage = 0L; msaaColorMemory = 0L; msaaColorView = 0L
+        sceneTexImage = 0L; sceneTexMemory = 0L; sceneTexView = 0L; sceneTexSampler = 0L
     }
 }

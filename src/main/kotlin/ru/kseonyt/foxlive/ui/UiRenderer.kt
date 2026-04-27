@@ -155,7 +155,8 @@ class UiRenderer(val ctx: VulkanContext, val swapchain: VulkanSwapchain, val fra
         val ms = VkPipelineMultisampleStateCreateInfo.calloc(st)
             .sType(VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO)
             .sampleShadingEnable(false)
-            .rasterizationSamples(swapchain.msaaSamples)
+            // UI is drawn into the (single-sample) composite pass after postfx so text stays sharp
+            .rasterizationSamples(VK_SAMPLE_COUNT_1_BIT)
 
         val ds = VkPipelineDepthStencilStateCreateInfo.calloc(st)
             .sType(VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO)
@@ -198,7 +199,7 @@ class UiRenderer(val ctx: VulkanContext, val swapchain: VulkanSwapchain, val fra
             .pInputAssemblyState(ia).pViewportState(vp)
             .pRasterizationState(rast).pMultisampleState(ms)
             .pDepthStencilState(ds).pColorBlendState(cb).pDynamicState(dyn)
-            .layout(pipelineLayout).renderPass(swapchain.renderPass).subpass(0)
+            .layout(pipelineLayout).renderPass(swapchain.compositePass).subpass(0)
         val pPipe = st.mallocLong(1)
         Vk.check(vkCreateGraphicsPipelines(ctx.device, VK_NULL_HANDLE, pipelineInfo, null, pPipe))
         pipeline = pPipe.get(0)

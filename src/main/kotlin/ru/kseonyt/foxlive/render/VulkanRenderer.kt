@@ -28,6 +28,9 @@ class VulkanRenderer(val window: Window, enableValidation: Boolean = false) {
     val swapchain = VulkanSwapchain(ctx)
     val pipeline = VulkanPipeline(ctx, swapchain)
     val ui = UiRenderer(ctx, swapchain, MAX_FRAMES_IN_FLIGHT)
+    val postfx = PostfxPipeline(ctx, swapchain)
+    /** Public — game/scene code can mutate any field, the values are read each frame. */
+    val postFxParams = PostFxParams()
     val viewport = Viewport(0, 0, window.width, window.height)
 
     private val commandBuffers = ArrayList<VkCommandBuffer>(MAX_FRAMES_IN_FLIGHT)
@@ -80,6 +83,7 @@ class VulkanRenderer(val window: Window, enableValidation: Boolean = false) {
         createInstanceBuffers()
         createDefaultTextures()
         ui.init()
+        postfx.create()
         viewport.width = swapchain.extentWidth
         viewport.height = swapchain.extentHeight
         println("[FoxLive] Vulkan ready — MSAA x${samplesToInt(swapchain.msaaSamples)}, " +
@@ -277,7 +281,11 @@ class VulkanRenderer(val window: Window, enableValidation: Boolean = false) {
             val pImageIndex = st.mallocInt(1)
             val acquireResult = vkAcquireNextImageKHR(ctx.device, swapchain.swapchain, Long.MAX_VALUE,
                 imageAvailable[currentFrame], VK_NULL_HANDLE, pImageIndex)
-            if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR || window.resized) {
+            // Only OUT_OF_DATE forces an immediate recreate. SUBOPTIMAL or window-resize
+            // are deferred until AFTER present so the imageAvailable semaphore we just
+            // signalled is properly waited on by the submit (otherwise it'd be left
+            // signalled — undefined to call vkAcquireNextImageKHR with it again).
+            if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR) {
                 recreateSwapchain()
                 return@use
             } else if (acquireResult != VK_SUCCESS && acquireResult != VK_SUBOPTIMAL_KHR) {
@@ -321,6 +329,8 @@ class VulkanRenderer(val window: Window, enableValidation: Boolean = false) {
         pipeline.destroy()
         pipeline.create()
         ui.recreateForNewRenderPass()
+        postfx.destroy()
+        postfx.create()
         // Re-allocate descriptor sets are tied to the layout — pipeline.create recreates the layout
         // so existing material descriptor sets reference a destroyed layout. Reset them.
         for (mat in managedMaterials) { mat.initialized = false; mat.descriptorSet = 0L }
@@ -338,25 +348,23 @@ class VulkanRenderer(val window: Window, enableValidation: Boolean = false) {
                 .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO)
             Vk.check(vkBeginCommandBuffer(cmd, begin))
 
+            // ─── PASS 1: scene → sceneTex ─────────────────────────────────────
             val msaa = swapchain.msaaSamples != VK_SAMPLE_COUNT_1_BIT
-            val clearCount = if (msaa) 3 else 2
-            val clearValues = VkClearValue.calloc(clearCount, st)
-            // Index 0 = color (or msaa color)
-            clearValues.get(0).color { it.float32(0, clearR).float32(1, clearG).float32(2, clearB).float32(3, 1f) }
-            // Index 1 = depth
-            clearValues.get(1).depthStencil { it.depth(1f).stencil(0) }
-            // Index 2 = resolve color (clear value ignored due to LOAD_OP_DONT_CARE, but must be present)
-            if (msaa) clearValues.get(2).color { it.float32(0, clearR).float32(1, clearG).float32(2, clearB).float32(3, 1f) }
+            val sceneClearCount = if (msaa) 3 else 2
+            val sceneClears = VkClearValue.calloc(sceneClearCount, st)
+            sceneClears.get(0).color { it.float32(0, clearR).float32(1, clearG).float32(2, clearB).float32(3, 1f) }
+            sceneClears.get(1).depthStencil { it.depth(1f).stencil(0) }
+            if (msaa) sceneClears.get(2).color { it.float32(0, clearR).float32(1, clearG).float32(2, clearB).float32(3, 1f) }
 
-            val rpBegin = VkRenderPassBeginInfo.calloc(st)
+            val sceneRpBegin = VkRenderPassBeginInfo.calloc(st)
                 .sType(VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO)
-                .renderPass(swapchain.renderPass)
-                .framebuffer(swapchain.framebuffers[imageIndex])
-                .pClearValues(clearValues)
-            rpBegin.renderArea().offset().set(0, 0)
-            rpBegin.renderArea().extent().set(swapchain.extentWidth, swapchain.extentHeight)
+                .renderPass(swapchain.scenePass)
+                .framebuffer(swapchain.sceneFramebuffer)
+                .pClearValues(sceneClears)
+            sceneRpBegin.renderArea().offset().set(0, 0)
+            sceneRpBegin.renderArea().extent().set(swapchain.extentWidth, swapchain.extentHeight)
 
-            vkCmdBeginRenderPass(cmd, rpBegin, VK_SUBPASS_CONTENTS_INLINE)
+            vkCmdBeginRenderPass(cmd, sceneRpBegin, VK_SUBPASS_CONTENTS_INLINE)
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.pipeline)
 
             val vp = VkViewport.calloc(1, st)
@@ -446,10 +454,37 @@ class VulkanRenderer(val window: Window, enableValidation: Boolean = false) {
                 vkCmdDrawIndexed(cmd, d.mesh.indexCount, d.instanceCount, 0, 0, d.firstInstance)
             }
 
-            // Scene-specific custom rendering (water, post effects) inside the same pass
+            // Scene-specific custom rendering (water, etc.) — still inside scenePass
             customRender?.invoke(cmd, currentFrame)
 
-            // Overlay debug UI in the same render pass (after 3D scene)
+            vkCmdEndRenderPass(cmd)
+
+            // ─── PASS 2: postfx fullscreen + UI overlay → swapchain ──────────
+            val compClears = VkClearValue.calloc(1, st)
+            compClears.get(0).color { it.float32(0, 0f).float32(1, 0f).float32(2, 0f).float32(3, 1f) }
+            val compRpBegin = VkRenderPassBeginInfo.calloc(st)
+                .sType(VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO)
+                .renderPass(swapchain.compositePass)
+                .framebuffer(swapchain.compositeFramebuffers[imageIndex])
+                .pClearValues(compClears)
+            compRpBegin.renderArea().offset().set(0, 0)
+            compRpBegin.renderArea().extent().set(swapchain.extentWidth, swapchain.extentHeight)
+            vkCmdBeginRenderPass(cmd, compRpBegin, VK_SUBPASS_CONTENTS_INLINE)
+
+            // Re-set viewport/scissor for composite pass (dynamic state)
+            val cVp = VkViewport.calloc(1, st)
+                .x(0f).y(0f)
+                .width(swapchain.extentWidth.toFloat()).height(swapchain.extentHeight.toFloat())
+                .minDepth(0f).maxDepth(1f)
+            vkCmdSetViewport(cmd, 0, cVp)
+            val cSc = VkRect2D.calloc(1, st)
+            cSc.offset().set(0, 0); cSc.extent().set(swapchain.extentWidth, swapchain.extentHeight)
+            vkCmdSetScissor(cmd, 0, cSc)
+
+            // Postfx fullscreen-triangle pass — samples sceneTex via descriptor set
+            postfx.draw(cmd, postFxParams, elapsedSeconds)
+
+            // UI overlay (sharp, single-sample) draws on top of postfx output
             ui.draw(cmd, currentFrame)
 
             vkCmdEndRenderPass(cmd)
@@ -486,6 +521,7 @@ class VulkanRenderer(val window: Window, enableValidation: Boolean = false) {
             }
 
             if (descriptorPool != 0L) vkDestroyDescriptorPool(ctx.device, descriptorPool, null)
+            postfx.destroy()
             ui.destroy()
             pipeline.destroy()
             swapchain.cleanup()
